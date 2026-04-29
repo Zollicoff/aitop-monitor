@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Header, Footer, Static
-
 from textual.events import Click
+from textual.widgets import Header, Footer, Static
 
 from .collectors.claude import (
     ClaudeCollector,
     ClaudeData,
     ClaudeSession,
+    TokenUsage,
+    SessionCost,
     TIMEFRAMES,
     TIMEFRAME_LABELS,
 )
 from .detail import AgentDetailScreen
+from .store import UsageStore
 
 
 REFRESH_INTERVAL = 5.0
@@ -51,6 +54,17 @@ THEMES = [
     "catppuccin-latte",
     "solarized-light",
 ]
+
+
+def _since_for(tf: str) -> str | None:
+    now = datetime.now(timezone.utc)
+    if tf == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    if tf == "7d":
+        return (now - timedelta(days=7)).isoformat()
+    if tf == "30d":
+        return (now - timedelta(days=30)).isoformat()
+    return None
 
 
 def cost_gauge(value: float, max_val: float, width: int = 20) -> str:
@@ -90,26 +104,20 @@ def fmt_cost(val: float) -> str:
 class BurnRatePanel(Static):
     def __init__(self) -> None:
         super().__init__()
-        self._data: ClaudeData | None = None
+        self._costs: dict[str, float] = {}
 
-    def update_data(self, data: ClaudeData) -> None:
-        self._data = data
+    def update_costs(self, costs: dict[str, float]) -> None:
+        self._costs = costs
         self.refresh()
 
     def render(self) -> str:
-        if not self._data:
+        if not self._costs:
             return ""
 
-        costs = {}
-        for tf in TIMEFRAMES:
-            _, tc = self._data.totals_for(tf)
-            costs[tf] = tc.total
-
-        max_cost = max(costs.values()) or 1
-
+        max_cost = max(self._costs.values()) or 1
         lines = []
         for tf in TIMEFRAMES:
-            val = costs[tf]
+            val = self._costs.get(tf, 0)
             gauge = cost_gauge(val, max_cost, 24)
             lines.append(
                 f"  [bold]{TF_SHORT[tf]:<7}[/]"
@@ -122,9 +130,9 @@ class BurnRatePanel(Static):
 class CostGrid(Static):
     def __init__(self) -> None:
         super().__init__()
-        self._data: ClaudeData | None = None
+        self._data: dict[str, SessionCost] = {}
 
-    def update_data(self, data: ClaudeData) -> None:
+    def update_costs(self, data: dict[str, SessionCost]) -> None:
         self._data = data
         self.refresh()
 
@@ -149,17 +157,16 @@ class CostGrid(Static):
         for label, attr in row_defs:
             row = f"  [dim]{label:<14}[/]"
             for tf in TIMEFRAMES:
-                _, tc = self._data.totals_for(tf)
-                val = getattr(tc, attr)
-                row += f" {fmt_cost(val):>8}"
+                sc = self._data.get(tf, SessionCost())
+                row += f" {fmt_cost(getattr(sc, attr)):>8}"
             lines.append(row)
 
         lines.append(f"  {'─' * 48}")
 
         total_row = f"  [bold]{'TOTAL':<14}[/]"
         for tf in TIMEFRAMES:
-            _, tc = self._data.totals_for(tf)
-            total_row += f" [bold reverse] {fmt_cost(tc.total):>6} [/]"
+            sc = self._data.get(tf, SessionCost())
+            total_row += f" [bold reverse] {fmt_cost(sc.total):>6} [/]"
         lines.append(total_row)
 
         return "\n".join(lines)
@@ -168,21 +175,28 @@ class CostGrid(Static):
 class AgentCard(Static):
     can_focus = True
 
-    def __init__(self, session: ClaudeSession, max_cost: float) -> None:
+    def __init__(
+        self,
+        session: ClaudeSession,
+        store_tokens: TokenUsage,
+        store_cost: SessionCost,
+        max_cost: float,
+    ) -> None:
         super().__init__()
         self.session = session
-        self.max_cost = max_cost
+        self._tokens = store_tokens
+        self._cost = store_cost
+        self._max_cost = max_cost
 
     def on_click(self, event: Click) -> None:
-        self.app.push_screen(AgentDetailScreen(self.session))
+        self.app.push_screen(AgentDetailScreen(self.session, self.app.store))
 
     def on_key(self, event) -> None:
         if event.key == "enter":
-            self.app.push_screen(AgentDetailScreen(self.session))
+            self.app.push_screen(AgentDetailScreen(self.session, self.app.store))
 
     def render(self) -> str:
         s = self.session
-        tokens_today, cost_today = s.usage_for("today")
 
         if s.status == "busy":
             indicator = "[bold]▶[/]"
@@ -192,14 +206,14 @@ class AgentCard(Static):
             name_style = "dim"
 
         model = short_model(s.model) if s.model else "—"
-        gauge = cost_gauge(cost_today.total, self.max_cost, 12)
+        gauge = cost_gauge(self._cost.total, self._max_cost, 12)
 
         return (
             f" {indicator} [{name_style}]{s.agent_name:<9}[/]"
             f" [dim]{model:<13}[/]"
             f" {gauge}"
-            f" [bold]{fmt_cost(cost_today.total):>9}[/]"
-            f" [dim]│[/] {tokens_today.total_str():>7}"
+            f" [bold]{fmt_cost(self._cost.total):>9}[/]"
+            f" [dim]│[/] {self._tokens.total_str():>7}"
             f" [dim]│[/] {s.uptime_str:>8}"
             f" [dim]│[/] {s.memory_mb:>5.0f}M"
         )
@@ -219,6 +233,8 @@ class AiTop(App):
     def __init__(self) -> None:
         super().__init__()
         self.collector = ClaudeCollector()
+        self.store = UsageStore()
+        self.store.import_dashboard_cache()
         self._data: ClaudeData | None = None
         self._theme_idx = 0
 
@@ -246,13 +262,27 @@ class AiTop(App):
 
     def _refresh_data(self) -> None:
         self._data = self.collector.collect()
+
+        for s in self._data.sessions:
+            self.store.ingest_session_entries(
+                s.session_id, s.agent_name.lower(), s.entries
+            )
+
         self._update_all()
 
     def _update_all(self) -> None:
         if not self._data:
             return
-        self.query_one(BurnRatePanel).update_data(self._data)
-        self.query_one(CostGrid).update_data(self._data)
+
+        burn_costs: dict[str, float] = {}
+        cost_grid: dict[str, SessionCost] = {}
+        for tf in TIMEFRAMES:
+            _, sc = self.store.query_totals(since=_since_for(tf))
+            burn_costs[tf] = sc.total
+            cost_grid[tf] = sc
+
+        self.query_one(BurnRatePanel).update_costs(burn_costs)
+        self.query_one(CostGrid).update_costs(cost_grid)
         self._update_fleet()
 
     def _update_fleet(self) -> None:
@@ -271,12 +301,23 @@ class AiTop(App):
         container = self.query_one("#fleet-cards")
         container.remove_children()
 
+        today_since = _since_for("today")
+        agent_costs: dict[str, tuple[TokenUsage, SessionCost]] = {}
+        for s in self._data.sessions:
+            name = s.agent_name.lower()
+            tokens, cost = self.store.query_totals(
+                agent_name=name, since=today_since
+            )
+            agent_costs[name] = (tokens, cost)
+
         max_cost = max(
-            (s.usage_for("today")[1].total for s in self._data.sessions), default=1
+            (c.total for _, c in agent_costs.values()), default=0.01
         ) or 0.01
 
         for s in self._data.sessions:
-            container.mount(AgentCard(s, max_cost))
+            name = s.agent_name.lower()
+            tokens, cost = agent_costs.get(name, (TokenUsage(), SessionCost()))
+            container.mount(AgentCard(s, tokens, cost, max_cost))
 
     def action_refresh(self) -> None:
         self._refresh_data()
@@ -287,6 +328,7 @@ class AiTop(App):
         self.sub_title = f"AI Tools Monitor — {self.theme}"
 
     def action_quit(self) -> None:
+        self.store.close()
         self.exit()
 
 
