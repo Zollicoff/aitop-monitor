@@ -1,0 +1,74 @@
+Screen {
+    background: $surface;
+}
+
+#main-container {
+    layout: vertical;
+    height: 100%;
+    overflow-y: auto;
+}
+
+#logo {
+    height: auto;
+    content-align: center middle;
+    margin: 0 1;
+}
+
+#top-panels {
+    layout: horizontal;
+    height: auto;
+    margin: 0 1;
+}
+
+#burn-panel {
+    width: 1fr;
+    height: auto;
+    border: heavy $primary;
+    margin: 0 1 0 0;
+    padding: 0 1;
+}
+
+#cost-grid-panel {
+    width: 2fr;
+    height: auto;
+    border: heavy $success;
+    padding: 0 1;
+}
+
+.panel-title {
+    text-style: bold;
+    color: $text;
+    margin: 0 0 1 0;
+}
+
+#fleet-panel {
+    height: auto;
+    border: heavy $warning;
+    margin: 1;
+    padding: 0 1;
+}
+
+#fleet-header {
+    height: 1;
+    margin: 0 0 0 0;
+}
+
+#fleet-cards {
+    height: auto;
+}
+
+AgentCard {
+    height: 1;
+}
+
+BurnRatePanel {
+    height: auto;
+}
+
+CostGrid {
+    height: auto;
+}
+
+Footer {
+    background: $primary-background;
+}
