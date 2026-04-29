@@ -9,6 +9,8 @@ from textual.binding import Binding
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Header, Footer, Static
 
+from textual.events import Click
+
 from .collectors.claude import (
     ClaudeCollector,
     ClaudeData,
@@ -16,6 +18,7 @@ from .collectors.claude import (
     TIMEFRAMES,
     TIMEFRAME_LABELS,
 )
+from .detail import AgentDetailScreen
 
 
 REFRESH_INTERVAL = 5.0
@@ -163,10 +166,19 @@ class CostGrid(Static):
 
 
 class AgentCard(Static):
+    can_focus = True
+
     def __init__(self, session: ClaudeSession, max_cost: float) -> None:
         super().__init__()
         self.session = session
         self.max_cost = max_cost
+
+    def on_click(self, event: Click) -> None:
+        self.app.push_screen(AgentDetailScreen(self.session))
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            self.app.push_screen(AgentDetailScreen(self.session))
 
     def render(self) -> str:
         s = self.session

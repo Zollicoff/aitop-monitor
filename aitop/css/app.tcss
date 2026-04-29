@@ -63,12 +63,43 @@ AgentCard {
     height: 1;
 }
 
+AgentCard:focus {
+    background: $accent 20%;
+    text-style: bold;
+}
+
+AgentCard:hover {
+    background: $accent 10%;
+}
+
 BurnRatePanel {
     height: auto;
 }
 
 CostGrid {
     height: auto;
+}
+
+/* Detail screen */
+#detail-container {
+    layout: vertical;
+    height: 100%;
+    overflow-y: auto;
+    padding: 1;
+}
+
+AgentSummary {
+    height: auto;
+    margin: 0 0 1 0;
+    border: heavy $accent;
+    padding: 1;
+}
+
+ProjectBreakdown {
+    height: auto;
+    margin: 0 0 1 0;
+    border: heavy $success;
+    padding: 1;
 }
 
 Footer {

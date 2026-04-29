@@ -133,6 +133,8 @@ class UsageEntry:
     timestamp: str  # ISO format
     tokens: TokenUsage
     cost: SessionCost
+    cwd: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -179,6 +181,19 @@ class ClaudeSession:
             tokens.add(e.tokens)
             cost.add(e.cost)
         return tokens, cost
+
+    def usage_by_project(self, timeframe: str) -> dict[str, tuple[TokenUsage, SessionCost]]:
+        cutoff = _cutoff_for(timeframe)
+        projects: dict[str, tuple[TokenUsage, SessionCost]] = {}
+        for e in self.entries:
+            if cutoff and e.timestamp < cutoff:
+                continue
+            cwd = e.cwd or self.cwd
+            if cwd not in projects:
+                projects[cwd] = (TokenUsage(), SessionCost())
+            projects[cwd][0].add(e.tokens)
+            projects[cwd][1].add(e.cost)
+        return dict(sorted(projects.items(), key=lambda x: -x[1][1].total))
 
 
 @dataclass
@@ -301,7 +316,11 @@ def _parse_session_usage(jsonl_path: Path) -> tuple[str, list[UsageEntry]]:
             tokens, cost = _compute_cost(model, usage)
 
             timestamp = data.get("timestamp", "")
-            entries.append(UsageEntry(timestamp=timestamp, tokens=tokens, cost=cost))
+            entry_cwd = data.get("cwd", "")
+            entries.append(UsageEntry(
+                timestamp=timestamp, tokens=tokens, cost=cost,
+                cwd=entry_cwd, model=model,
+            ))
 
     return last_model, entries
 
