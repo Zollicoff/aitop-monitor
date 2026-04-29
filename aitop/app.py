@@ -21,17 +21,33 @@ from .collectors.claude import (
 REFRESH_INTERVAL = 5.0
 CSS_PATH = Path(__file__).parent / "css" / "app.tcss"
 
-LOGO = """[bold cyan]  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+LOGO = """\
+  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   █                                                  █
-  █  ░█▀▀▄ ░▀█▀ ▀▀█▀▀ ░▄▀▀▄ ░█▀▀▄        [dim]AI Tools[/][bold cyan]    █
-  █  ░█▄▄█ ░░█░ ░░█░░ ░█░░█ ░█▄▄█        [dim]Monitor[/][bold cyan]     █
-  █  ░█░░█ ░▄█▄ ░░█░░ ░░▀▀░ ░█░░░        [dim]v0.1.0[/][bold cyan]      █
+  █  ░█▀▀▄ ░▀█▀ ▀▀█▀▀ ░▄▀▀▄ ░█▀▀▄        AI Tools    █
+  █  ░█▄▄█ ░░█░ ░░█░░ ░█░░█ ░█▄▄█        Monitor     █
+  █  ░█░░█ ░▄█▄ ░░█░░ ░░▀▀░ ░█░░░        v0.1.0      █
   █                                                  █
-  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[/]"""
+  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀"""
 
 GAUGE_CHARS = "░▒▓█"
 
 TF_SHORT = {"today": "Today", "7d": "7 Day", "30d": "30 Day", "all": "All"}
+
+THEMES = [
+    "textual-dark",
+    "dracula",
+    "tokyo-night",
+    "catppuccin-mocha",
+    "nord",
+    "gruvbox",
+    "monokai",
+    "rose-pine",
+    "solarized-dark",
+    "textual-light",
+    "catppuccin-latte",
+    "solarized-light",
+]
 
 
 def cost_gauge(value: float, max_val: float, width: int = 20) -> str:
@@ -87,21 +103,14 @@ class BurnRatePanel(Static):
             costs[tf] = tc.total
 
         max_cost = max(costs.values()) or 1
-        colors = {
-            "today": "bold green",
-            "7d": "bold cyan",
-            "30d": "bold yellow",
-            "all": "bold magenta",
-        }
 
         lines = []
         for tf in TIMEFRAMES:
             val = costs[tf]
             gauge = cost_gauge(val, max_cost, 24)
-            c = colors[tf]
             lines.append(
-                f"  [{c}]{TF_SHORT[tf]:<7}[/]"
-                f" [{c}]{gauge}[/]"
+                f"  [bold]{TF_SHORT[tf]:<7}[/]"
+                f" {gauge}"
                 f" [bold]{fmt_cost(val):>8}[/]"
             )
         return "\n".join(lines)
@@ -128,18 +137,18 @@ class CostGrid(Static):
         lines.append(header)
 
         row_defs = [
-            ("Input", "input_cost", "dim cyan"),
-            ("Output", "output_cost", "bold cyan"),
-            ("Cache read", "cache_read_cost", "green"),
-            ("Cache write", "cache_create_cost", "yellow"),
+            ("Input", "input_cost"),
+            ("Output", "output_cost"),
+            ("Cache read", "cache_read_cost"),
+            ("Cache write", "cache_create_cost"),
         ]
 
-        for label, attr, color in row_defs:
-            row = f"  [{color}]{label:<14}[/]"
+        for label, attr in row_defs:
+            row = f"  [dim]{label:<14}[/]"
             for tf in TIMEFRAMES:
                 _, tc = self._data.totals_for(tf)
                 val = getattr(tc, attr)
-                row += f" [{color}]{fmt_cost(val):>8}[/]"
+                row += f" {fmt_cost(val):>8}"
             lines.append(row)
 
         lines.append(f"  {'─' * 48}")
@@ -164,8 +173,8 @@ class AgentCard(Static):
         tokens_today, cost_today = s.usage_for("today")
 
         if s.status == "busy":
-            indicator = "[bold green]▶[/]"
-            name_style = "bold green"
+            indicator = "[bold]▶[/]"
+            name_style = "bold"
         else:
             indicator = "[dim]●[/]"
             name_style = "dim"
@@ -173,17 +182,10 @@ class AgentCard(Static):
         model = short_model(s.model) if s.model else "—"
         gauge = cost_gauge(cost_today.total, self.max_cost, 12)
 
-        if cost_today.total > self.max_cost * 0.5:
-            gauge_color = "yellow"
-        elif cost_today.total > 0:
-            gauge_color = "cyan"
-        else:
-            gauge_color = "dim"
-
         return (
             f" {indicator} [{name_style}]{s.agent_name:<9}[/]"
             f" [dim]{model:<13}[/]"
-            f" [{gauge_color}]{gauge}[/]"
+            f" {gauge}"
             f" [bold]{fmt_cost(cost_today.total):>9}[/]"
             f" [dim]│[/] {tokens_today.total_str():>7}"
             f" [dim]│[/] {s.uptime_str:>8}"
@@ -199,13 +201,14 @@ class AiTop(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
-        Binding("d", "toggle_dark", "Dark/Light"),
+        Binding("t", "cycle_theme", "Theme"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self.collector = ClaudeCollector()
         self._data: ClaudeData | None = None
+        self._theme_idx = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -213,18 +216,19 @@ class AiTop(App):
             yield Static(LOGO, id="logo")
             with Horizontal(id="top-panels"):
                 with Vertical(id="burn-panel"):
-                    yield Static("[bold] BURN RATE[/]", classes="panel-title")
+                    yield Static("[bold]BURN RATE[/]", classes="panel-title")
                     yield BurnRatePanel()
                 with Vertical(id="cost-grid-panel"):
-                    yield Static("[bold] COST BREAKDOWN[/]", classes="panel-title")
+                    yield Static("[bold]COST BREAKDOWN[/]", classes="panel-title")
                     yield CostGrid()
             with Vertical(id="fleet-panel"):
-                yield Static("[bold] FLEET STATUS[/]", classes="panel-title")
+                yield Static("[bold]FLEET STATUS[/]", classes="panel-title")
                 yield Static("", id="fleet-header")
                 yield Vertical(id="fleet-cards")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.theme = THEMES[0]
         self._refresh_data()
         self.set_interval(REFRESH_INTERVAL, self._refresh_data)
 
@@ -245,11 +249,11 @@ class AiTop(App):
 
         header = self.query_one("#fleet-header", Static)
         header.update(
-            f" [dim]  {'Agent':<9} {'Model':<13}"
+            f"   {'Agent':<9} {'Model':<13}"
             f" {'Burn':>12}  {'Cost':>9}"
             f" │ {'Tokens':>7}"
             f" │ {'Uptime':>8}"
-            f" │ {'Mem':>6}[/]"
+            f" │ {'Mem':>6}"
         )
 
         container = self.query_one("#fleet-cards")
@@ -265,11 +269,13 @@ class AiTop(App):
     def action_refresh(self) -> None:
         self._refresh_data()
 
-    def action_toggle_dark(self) -> None:
-        if self.theme == "textual-dark":
-            self.theme = "textual-light"
-        else:
-            self.theme = "textual-dark"
+    def action_cycle_theme(self) -> None:
+        self._theme_idx = (self._theme_idx + 1) % len(THEMES)
+        self.theme = THEMES[self._theme_idx]
+        self.sub_title = f"AI Tools Monitor — {self.theme}"
+
+    def action_quit(self) -> None:
+        self.exit()
 
 
 def run() -> None:

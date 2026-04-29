@@ -25,34 +25,47 @@ TIMEFRAME_LABELS = {
 }
 
 # Anthropic API pricing (USD per million tokens)
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+# Cache write uses 5-minute rate (1.25x input), matching Claude_Code_CLI_Usage
+# Cache read = 0.1x input
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "claude-opus-4-6": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_read": 1.50,
-        "cache_create": 18.75,
-    },
-    "claude-opus-4-7": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_read": 1.50,
-        "cache_create": 18.75,
-    },
-    "claude-sonnet-4-6": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_read": 0.30,
-        "cache_create": 3.75,
-    },
-    "claude-haiku-4-5-20251001": {
-        "input": 0.80,
-        "output": 4.0,
-        "cache_read": 0.08,
-        "cache_create": 1.0,
-    },
+    "claude-opus-4-7":          {"input": 5.0,  "output": 25.0, "cache_write": 6.25,  "cache_read": 0.50},
+    "claude-opus-4-6":          {"input": 5.0,  "output": 25.0, "cache_write": 6.25,  "cache_read": 0.50},
+    "claude-opus-4-5-20251101": {"input": 5.0,  "output": 25.0, "cache_write": 6.25,  "cache_read": 0.50},
+    "claude-opus-4-1-20250805": {"input": 15.0, "output": 75.0, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-opus-4-20250514":   {"input": 15.0, "output": 75.0, "cache_write": 18.75, "cache_read": 1.50},
+    "claude-sonnet-4-6":        {"input": 3.0,  "output": 15.0, "cache_write": 3.75,  "cache_read": 0.30},
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0, "cache_write": 3.75, "cache_read": 0.30},
+    "claude-sonnet-4-20250514": {"input": 3.0,  "output": 15.0, "cache_write": 3.75,  "cache_read": 0.30},
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0,  "cache_write": 1.25,  "cache_read": 0.10},
+    "claude-haiku-3-5-20241022": {"input": 0.80, "output": 4.0, "cache_write": 1.0,   "cache_read": 0.08},
 }
 
 DEFAULT_PRICING = MODEL_PRICING["claude-sonnet-4-6"]
+
+
+def _match_pricing(model: str) -> dict[str, float]:
+    if model in MODEL_PRICING:
+        return MODEL_PRICING[model]
+    lower = model.lower()
+    for key, pricing in MODEL_PRICING.items():
+        if key in lower or lower in key:
+            return pricing
+    for pattern, pricing in [
+        ("opus-4-7", MODEL_PRICING["claude-opus-4-7"]),
+        ("opus-4-6", MODEL_PRICING["claude-opus-4-6"]),
+        ("opus-4-5", MODEL_PRICING["claude-opus-4-5-20251101"]),
+        ("opus-4-1", MODEL_PRICING["claude-opus-4-1-20250805"]),
+        ("opus-4",   MODEL_PRICING["claude-opus-4-20250514"]),
+        ("sonnet-4-6", MODEL_PRICING["claude-sonnet-4-6"]),
+        ("sonnet-4-5", MODEL_PRICING["claude-sonnet-4-5-20250929"]),
+        ("sonnet-4",   MODEL_PRICING["claude-sonnet-4-20250514"]),
+        ("haiku-4-5",  MODEL_PRICING["claude-haiku-4-5-20251001"]),
+        ("haiku-3-5",  MODEL_PRICING["claude-haiku-3-5-20241022"]),
+    ]:
+        if pattern in lower:
+            return pricing
+    return DEFAULT_PRICING
 
 
 @dataclass
@@ -223,7 +236,7 @@ def _find_session_jsonl(session_id: str, cwd: str) -> Path | None:
 
 
 def _compute_cost(model: str, usage: dict) -> tuple[TokenUsage, SessionCost]:
-    pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+    pricing = _match_pricing(model)
     inp = usage.get("input_tokens", 0)
     out = usage.get("output_tokens", 0)
     c_read = usage.get("cache_read_input_tokens", 0)
@@ -239,7 +252,7 @@ def _compute_cost(model: str, usage: dict) -> tuple[TokenUsage, SessionCost]:
         input_cost=inp * pricing["input"] / 1_000_000,
         output_cost=out * pricing["output"] / 1_000_000,
         cache_read_cost=c_read * pricing["cache_read"] / 1_000_000,
-        cache_create_cost=c_create * pricing["cache_create"] / 1_000_000,
+        cache_create_cost=c_create * pricing["cache_write"] / 1_000_000,
     )
     return tokens, cost
 
@@ -247,15 +260,13 @@ def _compute_cost(model: str, usage: dict) -> tuple[TokenUsage, SessionCost]:
 def _parse_session_usage(jsonl_path: Path) -> tuple[str, list[UsageEntry]]:
     entries: list[UsageEntry] = []
     last_model = ""
+    seen: set[str] = set()
 
     with open(jsonl_path) as f:
         for line in f:
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                continue
-
-            if data.get("type") != "assistant":
                 continue
 
             msg = data.get("message")
@@ -266,6 +277,21 @@ def _parse_session_usage(jsonl_path: Path) -> tuple[str, list[UsageEntry]]:
             if not usage:
                 continue
 
+            msg_id = msg.get("id", "")
+            req_id = data.get("requestId", "")
+            if msg_id and req_id:
+                dedup_key = f"{msg_id}:{req_id}"
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+            inp = usage.get("input_tokens", 0)
+            out = usage.get("output_tokens", 0)
+            c_create = usage.get("cache_creation_input_tokens", 0)
+            c_read = usage.get("cache_read_input_tokens", 0)
+            if not (inp or out or c_create or c_read):
+                continue
+
             model = msg.get("model", "")
             if model == "<synthetic>" or not model:
                 model = last_model or "unknown"
@@ -273,6 +299,7 @@ def _parse_session_usage(jsonl_path: Path) -> tuple[str, list[UsageEntry]]:
                 last_model = model
 
             tokens, cost = _compute_cost(model, usage)
+
             timestamp = data.get("timestamp", "")
             entries.append(UsageEntry(timestamp=timestamp, tokens=tokens, cost=cost))
 

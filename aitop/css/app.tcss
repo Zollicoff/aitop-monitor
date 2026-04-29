@@ -1,5 +1,6 @@
 Screen {
     background: $surface;
+    color: $text;
 }
 
 #main-container {
@@ -12,6 +13,7 @@ Screen {
     height: auto;
     content-align: center middle;
     margin: 0 1;
+    color: $accent;
 }
 
 #top-panels {
@@ -23,7 +25,7 @@ Screen {
 #burn-panel {
     width: 1fr;
     height: auto;
-    border: heavy $primary;
+    border: heavy $accent;
     margin: 0 1 0 0;
     padding: 0 1;
 }
@@ -37,7 +39,7 @@ Screen {
 
 .panel-title {
     text-style: bold;
-    color: $text;
+    color: $accent;
     margin: 0 0 1 0;
 }
 
@@ -50,7 +52,7 @@ Screen {
 
 #fleet-header {
     height: 1;
-    margin: 0 0 0 0;
+    color: $text-muted;
 }
 
 #fleet-cards {
@@ -70,5 +72,5 @@ CostGrid {
 }
 
 Footer {
-    background: $primary-background;
+    background: $panel;
 }
