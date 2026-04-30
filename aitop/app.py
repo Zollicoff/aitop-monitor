@@ -20,6 +20,8 @@ from .collectors.claude import (
     TIMEFRAMES,
     TIMEFRAME_LABELS,
 )
+from .collectors.codex import CodexCollector
+from .collectors.gemini import GeminiCollector
 from .budget import BudgetScreen
 from .config import Config
 from .detail import AgentDetailScreen
@@ -302,11 +304,22 @@ class AiTop(App):
     def __init__(self) -> None:
         super().__init__()
         self.collector = ClaudeCollector()
+        self.codex_collector = CodexCollector()
+        self.gemini_collector = GeminiCollector()
         self.store = UsageStore()
         self.store.import_dashboard_cache()
+        self._ingest_other_tools()
         self.config = Config()
         self._data: ClaudeData | None = None
         self._theme_idx = 0
+
+    def _ingest_other_tools(self) -> None:
+        for entry in self.codex_collector.collect_history():
+            agent = "codex"
+            self.store.ingest_session_entries("codex-hist", agent, [entry])
+        for entry in self.gemini_collector.collect_history():
+            agent = "gemini"
+            self.store.ingest_session_entries("gemini-hist", agent, [entry])
 
     def compose(self) -> ComposeResult:
         yield Header()
