@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -13,12 +12,10 @@ from textual.widgets import Header, Footer, Static
 
 from .collectors.claude import (
     ClaudeCollector,
-    ClaudeData,
     ClaudeSession,
     TokenUsage,
     SessionCost,
     TIMEFRAMES,
-    TIMEFRAME_LABELS,
 )
 from .collectors.codex import CodexCollector
 from .collectors.gemini import GeminiCollector
@@ -26,6 +23,14 @@ from .budget import BudgetScreen
 from .config import Config
 from .detail import AgentDetailScreen
 from .store import UsageStore
+from .utils import (
+    cost_gauge,
+    fmt_cost,
+    short_model,
+    since_for,
+    sparkline,
+    TF_SHORT,
+)
 
 
 REFRESH_INTERVAL = 5.0
@@ -39,11 +44,6 @@ LOGO = """\
   █  ░█░░█ ░▄█▄ ░░█░░ ░░▀▀░ ░█░░░        v0.1.0      █
   █                                                  █
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀"""
-
-GAUGE_CHARS = "░▒▓█"
-SPARK_CHARS = "▁▂▃▄▅▆▇█"
-
-TF_SHORT = {"today": "Today", "7d": "7 Day", "30d": "30 Day", "all": "All"}
 
 THEMES = [
     "textual-dark",
@@ -59,61 +59,6 @@ THEMES = [
     "catppuccin-latte",
     "solarized-light",
 ]
-
-
-def _since_for(tf: str) -> str | None:
-    now = datetime.now(timezone.utc)
-    if tf == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    if tf == "7d":
-        return (now - timedelta(days=7)).isoformat()
-    if tf == "30d":
-        return (now - timedelta(days=30)).isoformat()
-    return None
-
-
-def cost_gauge(value: float, max_val: float, width: int = 20) -> str:
-    if max_val <= 0:
-        return GAUGE_CHARS[0] * width
-    ratio = min(value / max_val, 1.0)
-    filled = int(ratio * width)
-    remainder = (ratio * width) - filled
-    bar = GAUGE_CHARS[3] * filled
-    if filled < width:
-        partial_idx = int(remainder * (len(GAUGE_CHARS) - 1))
-        bar += GAUGE_CHARS[partial_idx]
-        bar += GAUGE_CHARS[0] * (width - filled - 1)
-    return bar
-
-
-def sparkline(values: list[float]) -> str:
-    if not values:
-        return ""
-    max_val = max(values) or 1
-    return "".join(
-        SPARK_CHARS[min(int(v / max_val * (len(SPARK_CHARS) - 1)), len(SPARK_CHARS) - 1)]
-        for v in values
-    )
-
-
-def short_model(model: str) -> str:
-    return (
-        model
-        .replace("claude-", "")
-        .replace("-20251001", "")
-    )
-
-
-def fmt_cost(val: float) -> str:
-    if val >= 10_000:
-        return f"${val / 1000:.1f}K"
-    if val >= 1000:
-        return f"${val:,.0f}"
-    if val >= 1:
-        return f"${val:.2f}"
-    if val > 0:
-        return f"${val:.3f}"
-    return "$0"
 
 
 class BurnRatePanel(Static):
@@ -227,7 +172,7 @@ class DailyCostGraph(Static):
         max_val = max(values) or 1
         avg_val = sum(values) / len(values) if values else 0
 
-        first_date = self._daily[0][0][5:]  # MM-DD
+        first_date = self._daily[0][0][5:]
         last_date = self._daily[-1][0][5:]
         today_cost = values[-1] if values else 0
 
@@ -310,16 +255,16 @@ class AiTop(App):
         self.store.import_dashboard_cache()
         self._ingest_other_tools()
         self.config = Config()
-        self._data: ClaudeData | None = None
+        self._data = None
         self._theme_idx = 0
 
     def _ingest_other_tools(self) -> None:
-        for entry in self.codex_collector.collect_history():
-            agent = "codex"
-            self.store.ingest_session_entries("codex-hist", agent, [entry])
-        for entry in self.gemini_collector.collect_history():
-            agent = "gemini"
-            self.store.ingest_session_entries("gemini-hist", agent, [entry])
+        codex_entries = self.codex_collector.collect_history()
+        if codex_entries:
+            self.store.ingest_session_entries("codex-hist", "codex", codex_entries)
+        gemini_entries = self.gemini_collector.collect_history()
+        if gemini_entries:
+            self.store.ingest_session_entries("gemini-hist", "gemini", gemini_entries)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -363,7 +308,7 @@ class AiTop(App):
         burn_costs: dict[str, float] = {}
         cost_grid: dict[str, SessionCost] = {}
         for tf in TIMEFRAMES:
-            _, sc = self.store.query_totals(since=_since_for(tf))
+            _, sc = self.store.query_totals(since=since_for(tf))
             burn_costs[tf] = sc.total
             cost_grid[tf] = sc
 
@@ -391,7 +336,7 @@ class AiTop(App):
         container = self.query_one("#fleet-cards")
         container.remove_children()
 
-        today_since = _since_for("today")
+        today_since = since_for("today")
         agent_costs: dict[str, tuple[TokenUsage, SessionCost]] = {}
         for s in self._data.sessions:
             name = s.agent_name.lower()

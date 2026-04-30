@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -13,59 +10,11 @@ from textual.widgets import Header, Footer, Static
 
 from .collectors.claude import (
     ClaudeSession,
-    TokenUsage,
     SessionCost,
     TIMEFRAMES,
 )
 from .store import UsageStore
-
-TF_SHORT = {"today": "Today", "7d": "7 Day", "30d": "30 Day", "all": "All"}
-
-GAUGE_CHARS = "░▒▓█"
-
-
-def _since_for(tf: str) -> str | None:
-    now = datetime.now(timezone.utc)
-    if tf == "today":
-        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    if tf == "7d":
-        return (now - timedelta(days=7)).isoformat()
-    if tf == "30d":
-        return (now - timedelta(days=30)).isoformat()
-    return None
-
-
-def fmt_cost(val: float) -> str:
-    if val >= 10_000:
-        return f"${val / 1000:.1f}K"
-    if val >= 1000:
-        return f"${val:,.0f}"
-    if val >= 1:
-        return f"${val:.2f}"
-    if val > 0:
-        return f"${val:.3f}"
-    return "$0"
-
-
-def cost_gauge(value: float, max_val: float, width: int = 20) -> str:
-    if max_val <= 0:
-        return GAUGE_CHARS[0] * width
-    ratio = min(value / max_val, 1.0)
-    filled = int(ratio * width)
-    remainder = (ratio * width) - filled
-    bar = GAUGE_CHARS[3] * filled
-    if filled < width:
-        partial_idx = int(remainder * (len(GAUGE_CHARS) - 1))
-        bar += GAUGE_CHARS[partial_idx]
-        bar += GAUGE_CHARS[0] * (width - filled - 1)
-    return bar
-
-
-def short_path(cwd: str) -> str:
-    home = str(Path.home())
-    if cwd.startswith(home):
-        return "~" + cwd[len(home):]
-    return cwd
+from .utils import cost_gauge, fmt_cost, short_path, since_for, TF_SHORT
 
 
 class AgentSummary(Static):
@@ -94,7 +43,7 @@ class AgentSummary(Static):
         costs: dict[str, SessionCost] = {}
         for tf in TIMEFRAMES:
             _, sc = self._store.query_totals(
-                agent_name=name, since=_since_for(tf)
+                agent_name=name, since=since_for(tf)
             )
             costs[tf] = sc
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
@@ -14,7 +14,6 @@ import psutil
 CLAUDE_DIR = Path.home() / ".claude"
 SESSIONS_DIR = CLAUDE_DIR / "sessions"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
-STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 
 TIMEFRAMES = ["today", "7d", "30d", "all"]
 TIMEFRAME_LABELS = {
@@ -171,67 +170,13 @@ class ClaudeSession:
             return "[dim]○ idle[/]"
         return f"[yellow]? {self.status}[/]"
 
-    def usage_for(self, timeframe: str) -> tuple[TokenUsage, SessionCost]:
-        cutoff = _cutoff_for(timeframe)
-        tokens = TokenUsage()
-        cost = SessionCost()
-        for e in self.entries:
-            if cutoff and e.timestamp < cutoff:
-                continue
-            tokens.add(e.tokens)
-            cost.add(e.cost)
-        return tokens, cost
-
-    def usage_by_project(self, timeframe: str) -> dict[str, tuple[TokenUsage, SessionCost]]:
-        cutoff = _cutoff_for(timeframe)
-        projects: dict[str, tuple[TokenUsage, SessionCost]] = {}
-        for e in self.entries:
-            if cutoff and e.timestamp < cutoff:
-                continue
-            cwd = e.cwd or self.cwd
-            if cwd not in projects:
-                projects[cwd] = (TokenUsage(), SessionCost())
-            projects[cwd][0].add(e.tokens)
-            projects[cwd][1].add(e.cost)
-        return dict(sorted(projects.items(), key=lambda x: -x[1][1].total))
-
-
-@dataclass
-class DailyStats:
-    date: str
-    message_count: int = 0
-    session_count: int = 0
-    tool_call_count: int = 0
 
 
 @dataclass
 class ClaudeData:
     sessions: list[ClaudeSession] = field(default_factory=list)
-    daily_stats: list[DailyStats] = field(default_factory=list)
     total_sessions: int = 0
     active_sessions: int = 0
-
-    def totals_for(self, timeframe: str) -> tuple[TokenUsage, SessionCost]:
-        tokens = TokenUsage()
-        cost = SessionCost()
-        for s in self.sessions:
-            t, c = s.usage_for(timeframe)
-            tokens.add(t)
-            cost.add(c)
-        return tokens, cost
-
-
-def _cutoff_for(timeframe: str) -> str | None:
-    now = datetime.now(timezone.utc)
-    if timeframe == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif timeframe == "7d":
-        start = now - timedelta(days=7)
-    elif timeframe == "30d":
-        start = now - timedelta(days=30)
-    else:
-        return None
-    return start.isoformat()
 
 
 def _derive_agent_name(cwd: str) -> str:
@@ -329,7 +274,6 @@ class ClaudeCollector:
     def collect(self) -> ClaudeData:
         data = ClaudeData()
         data.sessions = self._collect_sessions()
-        data.daily_stats = self._collect_stats()
         data.total_sessions = len(data.sessions)
         data.active_sessions = sum(1 for s in data.sessions if s.status == "busy")
         return data
@@ -389,21 +333,3 @@ class ClaudeCollector:
         sessions.sort(key=lambda s: (s.status != "busy", s.started_at))
         return sessions
 
-    def _collect_stats(self) -> list[DailyStats]:
-        stats: list[DailyStats] = []
-        if not STATS_CACHE.exists():
-            return stats
-
-        try:
-            raw = json.loads(STATS_CACHE.read_text())
-            for entry in raw.get("dailyActivity", []):
-                stats.append(DailyStats(
-                    date=entry.get("date", ""),
-                    message_count=entry.get("messageCount", 0),
-                    session_count=entry.get("sessionCount", 0),
-                    tool_call_count=entry.get("toolCallCount", 0),
-                ))
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-        return stats[-14:]
