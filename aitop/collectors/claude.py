@@ -362,6 +362,11 @@ class ClaudeCollector:
                 jsonl_path = _find_session_jsonl(session_id, cwd)
                 if jsonl_path:
                     model, entries = _parse_session_usage(jsonl_path)
+                    subagent_dir = jsonl_path.parent / session_id / "subagents"
+                    if subagent_dir.is_dir():
+                        for sub_jsonl in subagent_dir.glob("*.jsonl"):
+                            _, sub_entries = _parse_session_usage(sub_jsonl)
+                            entries.extend(sub_entries)
 
                 session = ClaudeSession(
                     pid=pid,

@@ -37,6 +37,7 @@ LOGO = """\
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀"""
 
 GAUGE_CHARS = "░▒▓█"
+SPARK_CHARS = "▁▂▃▄▅▆▇█"
 
 TF_SHORT = {"today": "Today", "7d": "7 Day", "30d": "30 Day", "all": "All"}
 
@@ -79,6 +80,16 @@ def cost_gauge(value: float, max_val: float, width: int = 20) -> str:
         bar += GAUGE_CHARS[partial_idx]
         bar += GAUGE_CHARS[0] * (width - filled - 1)
     return bar
+
+
+def sparkline(values: list[float]) -> str:
+    if not values:
+        return ""
+    max_val = max(values) or 1
+    return "".join(
+        SPARK_CHARS[min(int(v / max_val * (len(SPARK_CHARS) - 1)), len(SPARK_CHARS) - 1)]
+        for v in values
+    )
 
 
 def short_model(model: str) -> str:
@@ -172,6 +183,38 @@ class CostGrid(Static):
         return "\n".join(lines)
 
 
+class DailyCostGraph(Static):
+    def __init__(self) -> None:
+        super().__init__()
+        self._daily: list[tuple[str, float]] = []
+
+    def update_data(self, daily: list[tuple[str, float]]) -> None:
+        self._daily = daily
+        self.refresh()
+
+    def render(self) -> str:
+        if not self._daily:
+            return "  [dim]No historical data[/]"
+
+        values = [c for _, c in self._daily]
+        spark = sparkline(values)
+        max_val = max(values) or 1
+        avg_val = sum(values) / len(values) if values else 0
+
+        first_date = self._daily[0][0][5:]  # MM-DD
+        last_date = self._daily[-1][0][5:]
+        today_cost = values[-1] if values else 0
+
+        lines = [
+            f"  {first_date} {spark} {last_date}",
+            f"  [bold]Today: {fmt_cost(today_cost)}[/]"
+            f"  [dim]│[/] Avg: {fmt_cost(avg_val)}"
+            f"  [dim]│[/] Peak: {fmt_cost(max_val)}"
+            f"  [dim]│[/] {len(self._daily)}d",
+        ]
+        return "\n".join(lines)
+
+
 class AgentCard(Static):
     can_focus = True
 
@@ -228,6 +271,7 @@ class AiTop(App):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("t", "cycle_theme", "Theme"),
+        Binding("e", "export_csv", "Export CSV"),
     ]
 
     def __init__(self) -> None:
@@ -249,6 +293,9 @@ class AiTop(App):
                 with Vertical(id="cost-grid-panel"):
                     yield Static("[bold]COST BREAKDOWN[/]", classes="panel-title")
                     yield CostGrid()
+            with Vertical(id="graph-panel"):
+                yield Static("[bold]DAILY COST (30 days)[/]", classes="panel-title")
+                yield DailyCostGraph()
             with Vertical(id="fleet-panel"):
                 yield Static("[bold]FLEET STATUS[/]", classes="panel-title")
                 yield Static("", id="fleet-header")
@@ -283,6 +330,10 @@ class AiTop(App):
 
         self.query_one(BurnRatePanel).update_costs(burn_costs)
         self.query_one(CostGrid).update_costs(cost_grid)
+
+        daily = self.store.query_daily_costs(days=30)
+        self.query_one(DailyCostGraph).update_data(daily)
+
         self._update_fleet()
 
     def _update_fleet(self) -> None:
@@ -326,6 +377,11 @@ class AiTop(App):
         self._theme_idx = (self._theme_idx + 1) % len(THEMES)
         self.theme = THEMES[self._theme_idx]
         self.sub_title = f"AI Tools Monitor — {self.theme}"
+
+    def action_export_csv(self) -> None:
+        export_path = str(Path.home() / "aitop-export.csv")
+        count = self.store.export_csv(export_path)
+        self.notify(f"Exported {count:,} entries to {export_path}")
 
     def action_quit(self) -> None:
         self.store.close()

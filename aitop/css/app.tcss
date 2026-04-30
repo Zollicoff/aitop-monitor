@@ -80,6 +80,17 @@ CostGrid {
     height: auto;
 }
 
+#graph-panel {
+    height: auto;
+    border: heavy $accent;
+    margin: 0 1;
+    padding: 0 1;
+}
+
+DailyCostGraph {
+    height: auto;
+}
+
 /* Detail screen */
 #detail-container {
     layout: vertical;

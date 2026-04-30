@@ -294,6 +294,52 @@ class UsageStore:
             for r in rows
         ]
 
+    def query_daily_costs(
+        self,
+        agent_name: str | None = None,
+        days: int = 30,
+    ) -> list[tuple[str, float]]:
+        where = ["timestamp != ''"]
+        params: list = []
+        if agent_name:
+            where.append("agent_name = ?")
+            params.append(agent_name)
+
+        clause = f"WHERE {' AND '.join(where)}"
+        rows = self._conn.execute(
+            f"""SELECT SUBSTR(timestamp, 1, 10) AS day,
+                COALESCE(SUM(cost), 0)
+            FROM usage {clause}
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT ?""",
+            [*params, days],
+        ).fetchall()
+
+        return [(r[0], r[1]) for r in reversed(rows)]
+
+    def export_csv(self, path: str) -> int:
+        import csv
+        rows = self._conn.execute(
+            """SELECT timestamp, session_id, agent_name, model, project_path,
+                      input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                      input_cost, output_cost, cache_read_cost, cache_write_cost, cost
+               FROM usage ORDER BY timestamp"""
+        ).fetchall()
+
+        headers = [
+            "timestamp", "session_id", "agent_name", "model", "project_path",
+            "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
+            "input_cost", "output_cost", "cache_read_cost", "cache_write_cost", "total_cost",
+        ]
+
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            writer.writerows(rows)
+
+        return len(rows)
+
     @property
     def entry_count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM usage").fetchone()[0]
