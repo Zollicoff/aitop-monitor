@@ -20,6 +20,8 @@ from .collectors.claude import (
     TIMEFRAMES,
     TIMEFRAME_LABELS,
 )
+from .budget import BudgetScreen
+from .config import Config
 from .detail import AgentDetailScreen
 from .store import UsageStore
 
@@ -116,24 +118,46 @@ class BurnRatePanel(Static):
     def __init__(self) -> None:
         super().__init__()
         self._costs: dict[str, float] = {}
+        self._config: Config | None = None
 
-    def update_costs(self, costs: dict[str, float]) -> None:
+    def update_costs(self, costs: dict[str, float], config: Config | None = None) -> None:
         self._costs = costs
+        self._config = config
         self.refresh()
 
     def render(self) -> str:
         if not self._costs:
             return ""
 
+        budgets = {
+            "today": self._config.daily_budget if self._config else 0,
+            "7d": self._config.weekly_budget if self._config else 0,
+            "30d": self._config.monthly_budget if self._config else 0,
+            "all": 0,
+        }
+
         max_cost = max(self._costs.values()) or 1
         lines = []
         for tf in TIMEFRAMES:
             val = self._costs.get(tf, 0)
+            budget = budgets.get(tf, 0)
             gauge = cost_gauge(val, max_cost, 24)
+
+            if budget > 0 and val > budget:
+                alert = " [bold reverse] OVER [/]"
+            elif budget > 0 and val > budget * 0.8:
+                alert = " [bold] WARN [/]"
+            elif budget > 0:
+                pct = val / budget * 100
+                alert = f" {pct:.0f}%"
+            else:
+                alert = ""
+
             lines.append(
                 f"  [bold]{TF_SHORT[tf]:<7}[/]"
                 f" {gauge}"
                 f" [bold]{fmt_cost(val):>8}[/]"
+                f"{alert}"
             )
         return "\n".join(lines)
 
@@ -271,6 +295,7 @@ class AiTop(App):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
         Binding("t", "cycle_theme", "Theme"),
+        Binding("b", "set_budget", "Budget"),
         Binding("e", "export_csv", "Export CSV"),
     ]
 
@@ -279,6 +304,7 @@ class AiTop(App):
         self.collector = ClaudeCollector()
         self.store = UsageStore()
         self.store.import_dashboard_cache()
+        self.config = Config()
         self._data: ClaudeData | None = None
         self._theme_idx = 0
 
@@ -328,7 +354,7 @@ class AiTop(App):
             burn_costs[tf] = sc.total
             cost_grid[tf] = sc
 
-        self.query_one(BurnRatePanel).update_costs(burn_costs)
+        self.query_one(BurnRatePanel).update_costs(burn_costs, self.config)
         self.query_one(CostGrid).update_costs(cost_grid)
 
         daily = self.store.query_daily_costs(days=30)
@@ -377,6 +403,9 @@ class AiTop(App):
         self._theme_idx = (self._theme_idx + 1) % len(THEMES)
         self.theme = THEMES[self._theme_idx]
         self.sub_title = f"AI Tools Monitor — {self.theme}"
+
+    def action_set_budget(self) -> None:
+        self.push_screen(BudgetScreen(self.config))
 
     def action_export_csv(self) -> None:
         export_path = str(Path.home() / "aitop-export.csv")

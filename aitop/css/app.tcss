@@ -113,6 +113,23 @@ ProjectBreakdown {
     padding: 1;
 }
 
+/* Budget screen */
+#budget-container {
+    layout: vertical;
+    height: 100%;
+    overflow-y: auto;
+    padding: 1;
+}
+
+#budget-container Input {
+    margin: 0 2 1 2;
+    width: 30;
+}
+
+#budget-container Label {
+    margin: 0 0 0 0;
+}
+
 Footer {
     background: $panel;
 }

@@ -43,6 +43,8 @@ python run.py
 | `r` | Force refresh |
 | `Enter` | Open agent detail view |
 | `Esc` | Back to main view |
+| `b` | Set budget alerts |
+| `e` | Export all data to CSV |
 | `q` | Quit |
 
 ## Data Sources
@@ -53,6 +55,7 @@ aitop reads from Claude Code's local data:
 |--------|-----------------|
 | `~/.claude/sessions/*.json` | Active session registry (PID, status, CWD, uptime) |
 | `~/.claude/projects/*/*.jsonl` | Per-message token usage for live sessions |
+| `~/.claude/projects/*/subagents/*.jsonl` | Subagent (background task) token usage |
 | `~/.claude/usage-cache/dashboard-cache.json` | Historical cost data with pre-calculated costs |
 
 On first run, aitop imports the dashboard cache into a local SQLite database at `~/.local/share/aitop/usage.db`. Subsequent runs merge new data from active session logs, so history is preserved even after Claude Code prunes old files.
@@ -70,14 +73,19 @@ Costs are calculated using official Anthropic API rates. Cache writes use the 5-
 
 These are API-equivalent costs for comparison purposes. If you're on a Claude Max subscription, your actual billing is a flat monthly fee.
 
+## Budget Alerts
+
+Press `b` to set daily, weekly, and monthly spending limits. The burn rate panel shows:
+- **OVER** — spend exceeded the threshold
+- **WARN** — spend is above 80% of the threshold
+- **Percentage** — current spend relative to budget
+
+Config is saved to `~/.local/share/aitop/config.json`.
+
 ## Roadmap
 
 - [ ] Codex CLI support
 - [ ] Gemini CLI support
-- [ ] Subagent cost tracking
-- [ ] Daily/weekly cost graphs
-- [ ] Budget alerts
-- [ ] Export to CSV
 
 ## License
 
